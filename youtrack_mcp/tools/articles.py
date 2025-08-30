@@ -1,5 +1,7 @@
-""" YouTrack Articles (Knowledge Base) MCP tools.
 """
+YouTrack Articles (Knowledge Base) MCP tools.
+"""
+
 import logging
 from typing import Any, Dict, Optional
 
@@ -14,7 +16,7 @@ logger = logging.getLogger(__name__)
 class ArticleTools:
     """Article (Knowledge Base) related MCP tools."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize the article tools."""
         self.client = YouTrackClient()
         self.articles_api = ArticlesClient(self.client)
@@ -22,7 +24,10 @@ class ArticleTools:
     def close(self) -> None:
         """Close the API client."""
         if hasattr(self.client, "close"):
-            self.client.close()
+            try:
+                self.client.close()
+            except Exception:  # pragma: no cover
+                logger.exception("Failed to close YouTrackClient")
 
     @sync_wrapper
     def get_articles(
@@ -31,6 +36,7 @@ class ArticleTools:
         limit: int = 20,
         skip: int = 0,
         include_content: bool = False,
+        fields: Optional[str] = None,
     ) -> str:
         """
         Get a list of articles, optionally filtered by project.
@@ -44,17 +50,19 @@ class ArticleTools:
                     top=limit,
                     skip=skip,
                     include_content=include_content,
+                    fields=fields,
                 )
             else:
                 articles = self.articles_api.list_articles(
                     top=limit,
                     skip=skip,
                     include_content=include_content,
+                    fields=fields,
                 )
             # Pydantic models -> dict for JSON
             result = [a.model_dump() if hasattr(a, "model_dump") else a for a in articles]
             return format_json_response(result)
-        except Exception as e:
+        except Exception as e:  # pragma: no cover
             logger.exception("Error getting articles")
             return format_json_response({"error": str(e)})
 
@@ -63,6 +71,7 @@ class ArticleTools:
         self,
         article_id: str,
         include_content: bool = True,
+        fields: Optional[str] = None,
     ) -> str:
         """
         Get a single article by ID.
@@ -73,12 +82,14 @@ class ArticleTools:
             if not article_id:
                 return format_json_response({"error": "Article ID is required"})
             article = self.articles_api.get_article(
-                article_id=article_id, include_content=include_content
+                article_id=article_id,
+                include_content=include_content,
+                fields=fields,
             )
             result = article.model_dump() if hasattr(article, "model_dump") else article
             return format_json_response(result)
-        except Exception as e:
-            logger.exception(f"Error getting article {article_id}")
+        except Exception as e:  # pragma: no cover
+            logger.exception("Error getting article %s", article_id)
             return format_json_response({"error": str(e)})
 
     @sync_wrapper
@@ -88,6 +99,7 @@ class ArticleTools:
         limit: int = 20,
         skip: int = 0,
         include_content: bool = False,
+        fields: Optional[str] = None,
     ) -> str:
         """
         Get child (sub-)articles of a given article.
@@ -102,15 +114,16 @@ class ArticleTools:
                 top=limit,
                 skip=skip,
                 include_content=include_content,
+                fields=fields,
             )
             result = [c.model_dump() if hasattr(c, "model_dump") else c for c in children]
             return format_json_response(result)
-        except Exception as e:
-            logger.exception(f"Error getting child articles for {article_id}")
+        except Exception as e:  # pragma: no cover
+            logger.exception("Error getting child articles for %s", article_id)
             return format_json_response({"error": str(e)})
 
     def get_tool_definitions(self) -> Dict[str, Dict[str, Any]]:
-        """Get tool definitions with descriptions."""
+        """Get tool definitions with descriptions (MCP discovery)."""
         return {
             "get_articles": {
                 "description": (
@@ -124,6 +137,7 @@ class ArticleTools:
                     "limit": "Maximum number of articles to return (default: 20)",
                     "skip": "Number of articles to skip for pagination (default: 0)",
                     "include_content": "Include the article content body (default: False)",
+                    "fields": "YouTrack 'fields' parameter to control returned attributes (optional)",
                 },
             },
             "get_article": {
@@ -133,8 +147,9 @@ class ArticleTools:
                 ),
                 "function": self.get_article,
                 "parameter_descriptions": {
-                    "article_id": "Article database ID like '226-0'",
+                    "article_id": "Article database ID like '226-0' (or idReadable if your API supports it)",
                     "include_content": "Include the full content body (default: True)",
+                    "fields": "YouTrack 'fields' parameter to control returned attributes (optional)",
                 },
             },
             "get_article_children": {
@@ -148,4 +163,7 @@ class ArticleTools:
                     "limit": "Maximum number of sub-articles to return (default: 20)",
                     "skip": "Number of items to skip for pagination (default: 0)",
                     "include_content": "Include the content body (default: False)",
+                    "fields": "YouTrack 'fields' parameter to control returned attributes (optional)",
                 },
+            },
+        }
