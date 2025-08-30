@@ -50,8 +50,7 @@ class YouTrackMCPServer:
         # Initialize server with ToolServerBase
         self.server = ToolServerBase(
             name=config.MCP_SERVER_NAME,
-            instructions=config.MCP_SERVER_DESCRIPTION,
-            transport=transport,  # ToolServerBase expects 'transport' parameter
+            instructions=config.MCP_SERVER_DESCRIPTION,  # ToolServerBase expects 'transport' parameter
         )
 
         # Initialize tool registry
