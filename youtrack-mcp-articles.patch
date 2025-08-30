@@ -1,0 +1,312 @@
+diff --git a/youtrack_mcp/api/articles.py b/youtrack_mcp/api/articles.py
+new file mode 100644
+--- /dev/null
++++ b/youtrack_mcp/api/articles.py
+@@ -0,0 +1,153 @@
++""" YouTrack Articles (Knowledge Base) API client.
++"""
++from typing import Any, Dict, List, Optional
++from pydantic import BaseModel
++from youtrack_mcp.api.client import YouTrackClient
++import logging
++
++logger = logging.getLogger(__name__)
++
++
++class Article(BaseModel):
++    """Model for a YouTrack knowledge base article."""
++    # Allow extra fields returned by the API (tags, visibility, etc.)
++    model_config = {
++        "extra": "allow",
++        "populate_by_name": True,
++    }
++
++    id: str
++    idReadable: Optional[str] = None
++    summary: Optional[str] = None
++    content: Optional[str] = None
++    project: Optional[Dict[str, Any]] = None
++    reporter: Optional[Dict[str, Any]] = None
++    updatedBy: Optional[Dict[str, Any]] = None
++    created: Optional[int] = None
++    updated: Optional[int] = None
++    hasChildren: Optional[bool] = None
++    hasStar: Optional[bool] = None
++
++
++class ArticlesClient:
++    """Client for interacting with YouTrack Articles (Knowledge Base) API."""
++
++    def __init__(self, client: YouTrackClient):
++        """Initialize the Articles API client.
++        Args:
++            client: The YouTrack API client
++        """
++        self.client = client
++
++    def _default_fields(self, include_content: bool = False) -> str:
++        base = (
++            "id,idReadable,summary,project(id,shortName),"
++            "reporter(id,login,name),updated,created,hasChildren,hasStar"
++        )
++        return base + (",content" if include_content else "")
++
++    def list_articles(
++        self,
++        top: Optional[int] = None,
++        skip: Optional[int] = None,
++        include_content: bool = False,
++        fields: Optional[str] = None,
++    ) -> List[Article]:
++        """Get a list of articles.
++        See: GET /api/articles
++        """
++        params: Dict[str, Any] = {
++            "fields": fields or self._default_fields(include_content),
++        }
++        if top is not None:
++            params["$top"] = top
++        if skip is not None:
++            params["$skip"] = skip
++        resp = self.client.get("articles", params=params)
++        # API returns a list of dicts
++        return [Article.model_validate(a) for a in resp]
++
++    def get_article(
++        self,
++        article_id: str,
++        include_content: bool = True,
++        fields: Optional[str] = None,
++    ) -> Article:
++        """Get a specific article by ID.
++        See: GET /api/articles/{articleID}
++        """
++        params = {"fields": fields or self._default_fields(include_content)}
++        resp = self.client.get(f"articles/{article_id}", params=params)
++        return Article.model_validate(resp)
++
++    def list_child_articles(
++        self,
++        article_id: str,
++        top: Optional[int] = None,
++        skip: Optional[int] = None,
++        include_content: bool = False,
++        fields: Optional[str] = None,
++    ) -> List[Article]:
++        """Get sub-articles of a given article.
++        See: GET /api/articles/{articleID}/childArticles
++        """
++        params: Dict[str, Any] = {
++            "fields": fields or self._default_fields(include_content),
++        }
++        if top is not None:
++            params["$top"] = top
++        if skip is not None:
++            params["$skip"] = skip
++        resp = self.client.get(f"articles/{article_id}/childArticles", params=params)
++        return [Article.model_validate(a) for a in resp]
++
++    def list_project_articles(
++        self,
++        project_id: str,
++        top: Optional[int] = None,
++        skip: Optional[int] = None,
++        include_content: bool = False,
++        fields: Optional[str] = None,
++    ) -> List[Article]:
++        """Get articles for a specific project.
++        See: GET /api/admin/projects/{projectID}/articles
++        """
++        params: Dict[str, Any] = {
++            "fields": fields or self._default_fields(include_content),
++        }
++        if top is not None:
++            params["$top"] = top
++        if skip is not None:
++            params["$skip"] = skip
++        resp = self.client.get(f"admin/projects/{project_id}/articles", params=params)
++        return [Article.model_validate(a) for a in resp]
+diff --git a/youtrack_mcp/tools/articles.py b/youtrack_mcp/tools/articles.py
+new file mode 100644
+--- /dev/null
++++ b/youtrack_mcp/tools/articles.py
+@@ -0,0 +1,151 @@
++""" YouTrack Articles (Knowledge Base) MCP tools.
++"""
++import logging
++from typing import Any, Dict, Optional
++
++from youtrack_mcp.api.client import YouTrackClient
++from youtrack_mcp.api.articles import ArticlesClient
++from youtrack_mcp.mcp_wrappers import sync_wrapper
++from youtrack_mcp.utils import format_json_response
++
++logger = logging.getLogger(__name__)
++
++
++class ArticleTools:
++    """Article (Knowledge Base) related MCP tools."""
++
++    def __init__(self):
++        """Initialize the article tools."""
++        self.client = YouTrackClient()
++        self.articles_api = ArticlesClient(self.client)
++
++    def close(self) -> None:
++        """Close the API client."""
++        if hasattr(self.client, "close"):
++            self.client.close()
++
++    @sync_wrapper
++    def get_articles(
++        self,
++        project_id: Optional[str] = None,
++        limit: int = 20,
++        skip: int = 0,
++        include_content: bool = False,
++    ) -> str:
++        """
++        Get a list of articles, optionally filtered by project.
++        FORMAT: get_articles(project_id="DEMO", limit=20, skip=0, include_content=False)
++        Returns: JSON string with articles list
++        """
++        try:
++            if project_id:
++                articles = self.articles_api.list_project_articles(
++                    project_id=project_id,
++                    top=limit,
++                    skip=skip,
++                    include_content=include_content,
++                )
++            else:
++                articles = self.articles_api.list_articles(
++                    top=limit,
++                    skip=skip,
++                    include_content=include_content,
++                )
++            # Pydantic models -> dict for JSON
++            result = [a.model_dump() if hasattr(a, "model_dump") else a for a in articles]
++            return format_json_response(result)
++        except Exception as e:
++            logger.exception("Error getting articles")
++            return format_json_response({"error": str(e)})
++
++    @sync_wrapper
++    def get_article(
++        self,
++        article_id: str,
++        include_content: bool = True,
++    ) -> str:
++        """
++        Get a single article by ID.
++        FORMAT: get_article(article_id="226-0", include_content=True)
++        Returns: JSON string with article details
++        """
++        try:
++            if not article_id:
++                return format_json_response({"error": "Article ID is required"})
++            article = self.articles_api.get_article(
++                article_id=article_id, include_content=include_content
++            )
++            result = article.model_dump() if hasattr(article, "model_dump") else article
++            return format_json_response(result)
++        except Exception as e:
++            logger.exception(f"Error getting article {article_id}")
++            return format_json_response({"error": str(e)})
++
++    @sync_wrapper
++    def get_article_children(
++        self,
++        article_id: str,
++        limit: int = 20,
++        skip: int = 0,
++        include_content: bool = False,
++    ) -> str:
++        """
++        Get child (sub-)articles of a given article.
++        FORMAT: get_article_children(article_id="226-0", limit=10, skip=0, include_content=False)
++        Returns: JSON string with sub-articles
++        """
++        try:
++            if not article_id:
++                return format_json_response({"error": "Article ID is required"})
++            children = self.articles_api.list_child_articles(
++                article_id=article_id,
++                top=limit,
++                skip=skip,
++                include_content=include_content,
++            )
++            result = [c.model_dump() if hasattr(c, "model_dump") else c for c in children]
++            return format_json_response(result)
++        except Exception as e:
++            logger.exception(f"Error getting child articles for {article_id}")
++            return format_json_response({"error": str(e)})
++
++    def get_tool_definitions(self) -> Dict[str, Dict[str, Any]]:
++        """Get tool definitions with descriptions."""
++        return {
++            "get_articles": {
++                "description": (
++                    "Get a list of knowledge base articles. "
++                    "Optionally filter by project. "
++                    'Example: get_articles(project_id="DEMO", limit=10)'
++                ),
++                "function": self.get_articles,
++                "parameter_descriptions": {
++                    "project_id": "Project identifier like 'DEMO' or '0-0' (optional)",
++                    "limit": "Maximum number of articles to return (default: 20)",
++                    "skip": "Number of articles to skip for pagination (default: 0)",
++                    "include_content": "Include the article content body (default: False)",
++                },
++            },
++            "get_article": {
++                "description": (
++                    "Get a knowledge base article by ID. "
++                    'Example: get_article(article_id="226-0")'
++                ),
++                "function": self.get_article,
++                "parameter_descriptions": {
++                    "article_id": "Article database ID like '226-0'",
++                    "include_content": "Include the full content body (default: True)",
++                },
++            },
++            "get_article_children": {
++                "description": (
++                    "Get sub-articles for a given article. "
++                    'Example: get_article_children(article_id="226-0", limit=10)'
++                ),
++                "function": self.get_article_children,
++                "parameter_descriptions": {
++                    "article_id": "Parent article database ID like '226-0'",
++                    "limit": "Maximum number of sub-articles to return (default: 20)",
++                    "skip": "Number of items to skip for pagination (default: 0)",
++                    "include_content": "Include the content body (default: False)",
++                },
++            },
++        }
+diff --git a/youtrack_mcp/tools/loader.py b/youtrack_mcp/tools/loader.py
+--- a/youtrack_mcp/tools/loader.py
++++ b/youtrack_mcp/tools/loader.py
+@@ -1,20 +1,22 @@
+     from youtrack_mcp.tools.issues import IssueTools
+     from youtrack_mcp.tools.projects import ProjectTools
+     from youtrack_mcp.tools.users import UserTools
+     from youtrack_mcp.tools.search import SearchTools
+     from youtrack_mcp.tools.resources import ResourcesTools
++    from youtrack_mcp.tools.articles import ArticleTools
+@@ -25,10 +27,11 @@
+-    tool_classes = [
+-        IssueTools(),
+-        ProjectTools(),
+-        UserTools(),
+-        SearchTools(),
+-        ResourcesTools(),
+-    ]
++    tool_classes = [
++        IssueTools(),
++        ProjectTools(),
++        UserTools(),
++        SearchTools(),
++        ResourcesTools(),
++        ArticleTools(),  # Knowledge Base (articles)
++    ]
